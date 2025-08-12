@@ -61,7 +61,7 @@ export default async function handler(req, res) {
                         last_price = $1,
                         change_percent = $2,
                         last_updated = NOW()
-                    WHERE ticker = $4
+                    WHERE ticker = $3
                 `, [marketData.close, marketData.changePercent, ticker]);
                 marketUpdateCount++;
                 updateResults.push({
