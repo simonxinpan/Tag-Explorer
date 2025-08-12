@@ -96,12 +96,11 @@ export default async function handler(req, res) {
             if (marketData) {
                 await client.query(`
                     UPDATE stocks SET 
-                        current_price = $1,
+                        last_price = $1,
                         change_percent = $2,
-                        volume = $3,
-                        updated_at = NOW()
-                    WHERE ticker = $4
-                `, [marketData.close, marketData.changePercent, marketData.volume, ticker]);
+                        last_updated = NOW()
+                    WHERE ticker = $3
+                `, [marketData.close, marketData.changePercent, ticker]);
                 marketUpdateCount++;
             }
             
@@ -112,22 +111,16 @@ export default async function handler(req, res) {
                     await client.query(`
                         UPDATE stocks SET 
                             market_cap = $1,
-                            roe = $2,
-                            pe_ratio = $3,
+                            roe_ttm = $2,
+                            pe_ttm = $3,
                             dividend_yield = $4,
-                            debt_to_equity = $5,
-                            revenue_growth = $6,
-                            beta = $7,
-                            updated_at = NOW()
-                        WHERE ticker = $8
+                            last_updated = NOW()
+                        WHERE ticker = $5
                     `, [
                         financialData.metric.marketCapitalization,
                         financialData.metric.roeTTM,
                         financialData.metric.peTTM,
                         financialData.metric.dividendYieldAnnual,
-                        financialData.metric.totalDebt2TotalEquityAnnual,
-                        financialData.metric.revenueGrowthTTM,
-                        financialData.metric.beta,
                         ticker
                     ]);
                     financialUpdateCount++;
