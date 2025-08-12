@@ -2,12 +2,24 @@
 import { Pool } from 'pg';
 const pool = new Pool({ connectionString: process.env.NEON_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
-// 辅助函数：从 Finnhub 获取最新指标和报价
-async function getFinnhubData(symbol, type, apiKey) {
-    let url = '';
-    if (type === 'metrics') url = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${apiKey}`;
-    if (type === 'quote') url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`;
-    if (!url) return null;
+// 辅助函数：从 Polygon 获取全市场前一日快照数据
+async function getPolygonGroupedDaily(apiKey) {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dateStr = yesterday.toISOString().split('T')[0]; // YYYY-MM-DD格式
+    
+    const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${dateStr}?adjusted=true&apikey=${apiKey}`;
+    try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.results || [];
+    } catch { return null; }
+}
+
+// 辅助函数：从 Finnhub 获取基本面指标（保留用于财务数据）
+async function getFinnhubMetrics(symbol, apiKey) {
+    const url = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${apiKey}`;
     try {
         const res = await fetch(url);
         return res.ok ? res.json() : null;
@@ -45,84 +57,99 @@ export default async function handler(req, res) {
         await client.query(`DELETE FROM stock_tags WHERE tag_id IN (SELECT id FROM tags WHERE type != '行业分类' AND type != '特殊名单类');`);
         console.log("Cleared old dynamic tags.");
 
-        // 2. 获取所有股票的最新数据
-        const { rows: companies } = await client.query('SELECT ticker FROM stocks');
-        const allStockData = [];
-        for (const company of companies) {
-            const metrics = await getFinnhubData(company.ticker, 'metrics', process.env.FINNHUB_API_KEY);
-            const quote = await getFinnhubData(company.ticker, 'quote', process.env.FINNHUB_API_KEY);
-            if (metrics && quote) {
-                allStockData.push({ 
-                    ticker: company.ticker, 
-                    roe: metrics.metric?.roeTTM,
-                    pe: metrics.metric?.peTTM,
-                    high52: metrics.metric?.['52WeekHigh'],
-                    low52: metrics.metric?.['52WeekLow'],
-                    price: quote.c,
-                    changePercent: quote.dp,
-                    dividendYield: metrics.metric?.dividendYieldAnnual,
-                    marketCap: metrics.metric?.marketCapitalization,
-                    debtToEquity: metrics.metric?.totalDebt2TotalEquityAnnual,
-                    revenueGrowth: metrics.metric?.revenueGrowthTTM,
-                    beta: metrics.metric?.beta,
-                    volatility: metrics.metric?.volatility1Y,
-                    volumeRatio: quote.v / (metrics.metric?.avgVol10Day || 1),
-                    supportLevel: metrics.metric?.['52WeekLow'] * 1.1, // 简化支撑位计算
-                });
-            }
+        // 2. 一次性获取全市场Polygon数据
+        console.log("Fetching market data from Polygon...");
+        const polygonData = await getPolygonGroupedDaily(process.env.POLYGON_API_KEY);
+        if (!polygonData || polygonData.length === 0) {
+            throw new Error('Failed to fetch Polygon market data');
         }
-        console.log(`Fetched latest data for ${allStockData.length} stocks.`);
+        console.log(`Fetched ${polygonData.length} stocks from Polygon.`);
 
-        // 3. 重新计算并应用动态标签
+        // 3. 将Polygon数据转换为映射表，便于快速查找
+        const polygonMap = new Map();
+        polygonData.forEach(stock => {
+            polygonMap.set(stock.T, { // T是ticker symbol
+                open: stock.o,
+                close: stock.c,
+                high: stock.h,
+                low: stock.l,
+                volume: stock.v,
+                changePercent: ((stock.c - stock.o) / stock.o * 100).toFixed(2)
+            });
+        });
+
+        // 4. 批量更新stocks表的市场数据
+        console.log("Updating market data in database...");
+        for (const [ticker, data] of polygonMap) {
+            await client.query(`
+                UPDATE stocks SET 
+                    current_price = $1,
+                    change_percent = $2,
+                    volume = $3,
+                    updated_at = NOW()
+                WHERE ticker = $4
+            `, [data.close, data.changePercent, data.volume, ticker]);
+        }
+
+        // 5. 获取数据库中所有股票的完整信息（包括刚更新的市场数据和现有的财务数据）
+        const { rows: allStockData } = await client.query(`
+            SELECT ticker, current_price, change_percent, volume, market_cap,
+                   roe, pe_ratio, dividend_yield, debt_to_equity, revenue_growth, beta
+            FROM stocks 
+            WHERE current_price IS NOT NULL
+        `);
+        console.log(`Processing ${allStockData.length} stocks for tag calculation.`);
+
+        // 6. 重新计算并应用动态标签
         
         // 📈 股市表现类
-        const newHighStocks = allStockData.filter(s => s.price && s.high52 && s.price >= s.high52 * 0.98).map(s => s.ticker);
-        await applyTag('52周最高', '📈 股市表现类', newHighStocks, client);
-        
-        const newLowStocks = allStockData.filter(s => s.price && s.low52 && s.price <= s.low52 * 1.02).map(s => s.ticker);
-        await applyTag('52周最低', '📈 股市表现类', newLowStocks, client);
-        
-        const highYieldStocks = allStockData.filter(s => s.dividendYield > 3).sort((a,b) => b.dividendYield - a.dividendYield).slice(0, 45).map(s => s.ticker);
+        const highYieldStocks = allStockData.filter(s => s.dividend_yield > 3).sort((a,b) => b.dividend_yield - a.dividend_yield).slice(0, 45).map(s => s.ticker);
         await applyTag('高股息率', '📈 股市表现类', highYieldStocks, client);
         
-        const lowPeStocks = allStockData.filter(s => s.pe > 0 && s.pe < 15).sort((a,b) => a.pe - b.pe).slice(0, 67).map(s => s.ticker);
+        const lowPeStocks = allStockData.filter(s => s.pe_ratio > 0 && s.pe_ratio < 15).sort((a,b) => a.pe_ratio - b.pe_ratio).slice(0, 67).map(s => s.ticker);
         await applyTag('低市盈率', '📈 股市表现类', lowPeStocks, client);
         
-        const highMarketCapStocks = allStockData.filter(s => s.marketCap > 50000000000).sort((a,b) => b.marketCap - a.marketCap).slice(0, 50).map(s => s.ticker);
+        const highMarketCapStocks = allStockData.filter(s => s.market_cap > 50000000000).sort((a,b) => b.market_cap - a.market_cap).slice(0, 50).map(s => s.ticker);
         await applyTag('高市值', '📈 股市表现类', highMarketCapStocks, client);
 
         // 💰 财务表现类
         const highRoeStocks = allStockData.filter(s => s.roe > 15).sort((a,b) => b.roe - a.roe).slice(0, 50).map(s => s.ticker);
         await applyTag('高ROE', '💰 财务表现类', highRoeStocks, client);
         
-        const lowDebtStocks = allStockData.filter(s => s.debtToEquity >= 0 && s.debtToEquity < 0.3).sort((a,b) => a.debtToEquity - b.debtToEquity).slice(0, 78).map(s => s.ticker);
+        const lowDebtStocks = allStockData.filter(s => s.debt_to_equity >= 0 && s.debt_to_equity < 0.3).sort((a,b) => a.debt_to_equity - b.debt_to_equity).slice(0, 78).map(s => s.ticker);
         await applyTag('低负债率', '💰 财务表现类', lowDebtStocks, client);
         
-        const highGrowthStocks = allStockData.filter(s => s.revenueGrowth > 0.2).sort((a,b) => b.revenueGrowth - a.revenueGrowth).slice(0, 34).map(s => s.ticker);
+        const highGrowthStocks = allStockData.filter(s => s.revenue_growth > 0.2).sort((a,b) => b.revenue_growth - a.revenue_growth).slice(0, 34).map(s => s.ticker);
         await applyTag('高增长率', '💰 财务表现类', highGrowthStocks, client);
         
         const highBetaStocks = allStockData.filter(s => s.beta > 1.5).sort((a,b) => b.beta - a.beta).slice(0, 88).map(s => s.ticker);
         await applyTag('高贝塔系数', '💰 财务表现类', highBetaStocks, client);
         
         // VIX相关股票（高波动性）
-        const vixRelatedStocks = allStockData.filter(s => s.beta > 2 || (s.volatility && s.volatility > 0.4)).slice(0, 5).map(s => s.ticker);
+        const vixRelatedStocks = allStockData.filter(s => s.beta > 2).slice(0, 5).map(s => s.ticker);
         await applyTag('VIX恐慌指数相关', '💰 财务表现类', vixRelatedStocks, client);
 
-        // 🚀 趋势排位类
-        const strongTrendStocks = allStockData.filter(s => s.changePercent > 5).sort((a,b) => b.changePercent - a.changePercent).slice(0, 30).map(s => s.ticker);
+        // 🚀 趋势排位类（基于当日涨跌幅）
+        const strongTrendStocks = allStockData.filter(s => parseFloat(s.change_percent) > 5).sort((a,b) => parseFloat(b.change_percent) - parseFloat(a.change_percent)).slice(0, 30).map(s => s.ticker);
         await applyTag('近期强势', '🚀 趋势排位类', strongTrendStocks, client);
         
-        const weakTrendStocks = allStockData.filter(s => s.changePercent < -5).sort((a,b) => a.changePercent - b.changePercent).slice(0, 25).map(s => s.ticker);
+        const weakTrendStocks = allStockData.filter(s => parseFloat(s.change_percent) < -5).sort((a,b) => parseFloat(a.change_percent) - parseFloat(b.change_percent)).slice(0, 25).map(s => s.ticker);
         await applyTag('近期弱势', '🚀 趋势排位类', weakTrendStocks, client);
         
-        const highVolumeStocks = allStockData.filter(s => s.volumeRatio > 2).sort((a,b) => b.volumeRatio - a.volumeRatio).slice(0, 18).map(s => s.ticker);
+        // 获取平均成交量用于计算成交量放大
+        const { rows: avgVolumeData } = await client.query(`
+            SELECT ticker, AVG(volume) as avg_volume 
+            FROM stocks 
+            WHERE volume IS NOT NULL 
+            GROUP BY ticker
+        `);
+        const avgVolumeMap = new Map(avgVolumeData.map(row => [row.ticker, row.avg_volume]));
+        
+        const highVolumeStocks = allStockData.filter(s => {
+            const avgVol = avgVolumeMap.get(s.ticker);
+            return avgVol && s.volume > avgVol * 2;
+        }).sort((a,b) => b.volume - a.volume).slice(0, 18).map(s => s.ticker);
         await applyTag('成交量放大', '🚀 趋势排位类', highVolumeStocks, client);
-        
-        const breakoutStocks = allStockData.filter(s => s.price && s.high52 && s.price >= s.high52).slice(0, 23).map(s => s.ticker);
-        await applyTag('突破新高', '🚀 趋势排位类', breakoutStocks, client);
-        
-        const breakdownStocks = allStockData.filter(s => s.price && s.supportLevel && s.price <= s.supportLevel * 0.95).slice(0, 15).map(s => s.ticker);
-        await applyTag('跌破支撑', '🚀 趋势排位类', breakdownStocks, client);
 
         // 🏭 行业分类 (基于已有数据库sector字段)
         const { rows: sectorData } = await client.query(`
