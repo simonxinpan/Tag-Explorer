@@ -78,29 +78,83 @@ export default async function handler(req, res) {
             });
         });
 
-        // 4. 批量更新stocks表的市场数据
-        console.log("Updating market data in database...");
-        for (const [ticker, data] of polygonMap) {
-            await client.query(`
-                UPDATE stocks SET 
-                    current_price = $1,
-                    change_percent = $2,
-                    volume = $3,
-                    updated_at = NOW()
-                WHERE ticker = $4
-            `, [data.close, data.changePercent, data.volume, ticker]);
-        }
+        // 4. 获取数据库中所有股票列表
+        const { rows: companies } = await client.query('SELECT ticker FROM stocks');
+        console.log(`Found ${companies.length} companies in database.`);
 
-        // 5. 获取数据库中所有股票的完整信息（包括刚更新的市场数据和现有的财务数据）
+        let marketUpdateCount = 0;
+        let financialUpdateCount = 0;
+        
+        console.log("Starting decoupled data update process...");
+        
+        // 5. 解耦更新：分别处理市场数据和财务数据
+        for (const company of companies) {
+            const ticker = company.ticker;
+            const marketData = polygonMap.get(ticker);
+            
+            // 5a. 如果有Polygon市场数据，立即更新市场相关字段
+            if (marketData) {
+                await client.query(`
+                    UPDATE stocks SET 
+                        current_price = $1,
+                        change_percent = $2,
+                        volume = $3,
+                        updated_at = NOW()
+                    WHERE ticker = $4
+                `, [marketData.close, marketData.changePercent, marketData.volume, ticker]);
+                marketUpdateCount++;
+            }
+            
+            // 5b. 尝试获取Finnhub财务数据（允许失败）
+            try {
+                const financialData = await getFinnhubMetrics(ticker, process.env.FINNHUB_API_KEY);
+                if (financialData && financialData.metric) {
+                    await client.query(`
+                        UPDATE stocks SET 
+                            market_cap = $1,
+                            roe = $2,
+                            pe_ratio = $3,
+                            dividend_yield = $4,
+                            debt_to_equity = $5,
+                            revenue_growth = $6,
+                            beta = $7,
+                            updated_at = NOW()
+                        WHERE ticker = $8
+                    `, [
+                        financialData.metric.marketCapitalization,
+                        financialData.metric.roeTTM,
+                        financialData.metric.peTTM,
+                        financialData.metric.dividendYieldAnnual,
+                        financialData.metric.totalDebt2TotalEquityAnnual,
+                        financialData.metric.revenueGrowthTTM,
+                        financialData.metric.beta,
+                        ticker
+                    ]);
+                    financialUpdateCount++;
+                }
+            } catch (error) {
+                // 忽略单个股票的Finnhub错误，继续处理下一个
+                console.warn(`Finnhub data failed for ${ticker}:`, error.message);
+            }
+            
+            // 每处理100只股票输出一次进度
+            if ((marketUpdateCount + financialUpdateCount) % 100 === 0) {
+                console.log(`Progress: Market updates: ${marketUpdateCount}, Financial updates: ${financialUpdateCount}`);
+            }
+        }
+        
+        console.log(`Data update complete: Market data updated for ${marketUpdateCount} stocks, Financial data updated for ${financialUpdateCount} stocks.`);
+
+        // 6. 获取数据库中所有股票的完整信息用于标签计算
         const { rows: allStockData } = await client.query(`
             SELECT ticker, current_price, change_percent, volume, market_cap,
                    roe, pe_ratio, dividend_yield, debt_to_equity, revenue_growth, beta
             FROM stocks 
-            WHERE current_price IS NOT NULL
+            WHERE current_price IS NOT NULL OR market_cap IS NOT NULL
         `);
         console.log(`Processing ${allStockData.length} stocks for tag calculation.`);
 
-        // 6. 重新计算并应用动态标签
+        // 7. 重新计算并应用动态标签
         
         // 📈 股市表现类
         const highYieldStocks = allStockData.filter(s => s.dividend_yield > 3).sort((a,b) => b.dividend_yield - a.dividend_yield).slice(0, 45).map(s => s.ticker);
@@ -180,7 +234,7 @@ export default async function handler(req, res) {
         await applyTag('道琼斯', '⭐ 特殊名单类', dow30.map(s => s.ticker), client);
         
         // ESG评级高和分析师推荐 (基于财务指标)
-        const esgStocks = allStockData.filter(s => s.roe > 10 && s.debtToEquity < 0.5 && s.dividendYield > 1).sort((a,b) => b.roe - a.roe).slice(0, 89).map(s => s.ticker);
+        const esgStocks = allStockData.filter(s => s.roe > 10 && s.debt_to_equity < 0.5 && s.dividend_yield > 1).sort((a,b) => b.roe - a.roe).slice(0, 89).map(s => s.ticker);
         await applyTag('ESG评级高', '⭐ 特殊名单类', esgStocks, client);
         
         const analystRecommendStocks = allStockData.filter(s => s.pe > 0 && s.pe < 25 && s.roe > 8).sort((a,b) => b.roe - a.roe).slice(0, 120).map(s => s.ticker);
