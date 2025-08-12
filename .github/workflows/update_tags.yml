@@ -1,0 +1,17 @@
+name: Update Dynamic Tags Daily
+on:
+  schedule:
+    # 使用 CRON 语法，表示每天 UTC 时间 8点 (北京时间下午4点) 运行一次
+    - cron: '0 8 * * *'
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  update-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel API to trigger tag update
+        env:
+          DEPLOYMENT_URL: ${{ secrets.VERCEL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -X GET -H "Authorization: Bearer $CRON_SECRET" "$DEPLOYMENT_URL/api/update-tags"
