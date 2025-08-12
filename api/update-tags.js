@@ -143,10 +143,10 @@ export default async function handler(req, res) {
 
         // 6. 获取数据库中所有股票的完整信息用于标签计算
         const { rows: allStockData } = await client.query(`
-            SELECT ticker, current_price, change_percent, volume, market_cap,
-                   roe, pe_ratio, dividend_yield, debt_to_equity, revenue_growth, beta
+            SELECT ticker, last_price, change_percent, market_cap,
+                   roe_ttm, pe_ttm, dividend_yield
             FROM stocks 
-            WHERE current_price IS NOT NULL OR market_cap IS NOT NULL
+            WHERE last_price IS NOT NULL OR market_cap IS NOT NULL
         `);
         console.log(`Processing ${allStockData.length} stocks for tag calculation.`);
 
@@ -156,28 +156,17 @@ export default async function handler(req, res) {
         const highYieldStocks = allStockData.filter(s => s.dividend_yield > 3).sort((a,b) => b.dividend_yield - a.dividend_yield).slice(0, 45).map(s => s.ticker);
         await applyTag('高股息率', '📈 股市表现类', highYieldStocks, client);
         
-        const lowPeStocks = allStockData.filter(s => s.pe_ratio > 0 && s.pe_ratio < 15).sort((a,b) => a.pe_ratio - b.pe_ratio).slice(0, 67).map(s => s.ticker);
+        const lowPeStocks = allStockData.filter(s => s.pe_ttm > 0 && s.pe_ttm < 15).sort((a,b) => a.pe_ttm - b.pe_ttm).slice(0, 67).map(s => s.ticker);
         await applyTag('低市盈率', '📈 股市表现类', lowPeStocks, client);
         
         const highMarketCapStocks = allStockData.filter(s => s.market_cap > 50000000000).sort((a,b) => b.market_cap - a.market_cap).slice(0, 50).map(s => s.ticker);
         await applyTag('高市值', '📈 股市表现类', highMarketCapStocks, client);
 
         // 💰 财务表现类
-        const highRoeStocks = allStockData.filter(s => s.roe > 15).sort((a,b) => b.roe - a.roe).slice(0, 50).map(s => s.ticker);
+        const highRoeStocks = allStockData.filter(s => s.roe_ttm > 15).sort((a,b) => b.roe_ttm - a.roe_ttm).slice(0, 50).map(s => s.ticker);
         await applyTag('高ROE', '💰 财务表现类', highRoeStocks, client);
         
-        const lowDebtStocks = allStockData.filter(s => s.debt_to_equity >= 0 && s.debt_to_equity < 0.3).sort((a,b) => a.debt_to_equity - b.debt_to_equity).slice(0, 78).map(s => s.ticker);
-        await applyTag('低负债率', '💰 财务表现类', lowDebtStocks, client);
-        
-        const highGrowthStocks = allStockData.filter(s => s.revenue_growth > 0.2).sort((a,b) => b.revenue_growth - a.revenue_growth).slice(0, 34).map(s => s.ticker);
-        await applyTag('高增长率', '💰 财务表现类', highGrowthStocks, client);
-        
-        const highBetaStocks = allStockData.filter(s => s.beta > 1.5).sort((a,b) => b.beta - a.beta).slice(0, 88).map(s => s.ticker);
-        await applyTag('高贝塔系数', '💰 财务表现类', highBetaStocks, client);
-        
-        // VIX相关股票（高波动性）
-        const vixRelatedStocks = allStockData.filter(s => s.beta > 2).slice(0, 5).map(s => s.ticker);
-        await applyTag('VIX恐慌指数相关', '💰 财务表现类', vixRelatedStocks, client);
+        // 注意：debt_to_equity、revenue_growth、beta字段在当前数据库结构中不存在，暂时跳过相关标签
 
         // 🚀 趋势排位类（基于当日涨跌幅）
         const strongTrendStocks = allStockData.filter(s => parseFloat(s.change_percent) > 5).sort((a,b) => parseFloat(b.change_percent) - parseFloat(a.change_percent)).slice(0, 30).map(s => s.ticker);
@@ -186,20 +175,7 @@ export default async function handler(req, res) {
         const weakTrendStocks = allStockData.filter(s => parseFloat(s.change_percent) < -5).sort((a,b) => parseFloat(a.change_percent) - parseFloat(b.change_percent)).slice(0, 25).map(s => s.ticker);
         await applyTag('近期弱势', '🚀 趋势排位类', weakTrendStocks, client);
         
-        // 获取平均成交量用于计算成交量放大
-        const { rows: avgVolumeData } = await client.query(`
-            SELECT ticker, AVG(volume) as avg_volume 
-            FROM stocks 
-            WHERE volume IS NOT NULL 
-            GROUP BY ticker
-        `);
-        const avgVolumeMap = new Map(avgVolumeData.map(row => [row.ticker, row.avg_volume]));
-        
-        const highVolumeStocks = allStockData.filter(s => {
-            const avgVol = avgVolumeMap.get(s.ticker);
-            return avgVol && s.volume > avgVol * 2;
-        }).sort((a,b) => b.volume - a.volume).slice(0, 18).map(s => s.ticker);
-        await applyTag('成交量放大', '🚀 趋势排位类', highVolumeStocks, client);
+        // 注意：volume字段在当前数据库结构中不存在，跳过成交量相关标签
 
         // 🏭 行业分类 (基于已有数据库sector字段)
         const { rows: sectorData } = await client.query(`
