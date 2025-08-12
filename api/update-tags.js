@@ -44,7 +44,10 @@ async function applyTag(tagName, tagType, tickers, client) {
 
 // --- 主函数 ---
 export default async function handler(req, res) {
-    if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
+    // 添加测试模式：如果URL包含test=true参数，则跳过授权检查
+    const isTestMode = req.query.test === 'true';
+    
+    if (!isTestMode && req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
