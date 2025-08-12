@@ -58,19 +58,17 @@ export default async function handler(req, res) {
             if (marketData) {
                 await client.query(`
                     UPDATE stocks SET 
-                        current_price = $1,
+                        last_price = $1,
                         change_percent = $2,
-                        volume = $3,
-                        updated_at = NOW()
+                        last_updated = NOW()
                     WHERE ticker = $4
-                `, [marketData.close, marketData.changePercent, marketData.volume, ticker]);
+                `, [marketData.close, marketData.changePercent, ticker]);
                 marketUpdateCount++;
                 updateResults.push({
                     ticker,
                     updated: true,
                     price: marketData.close,
-                    change: marketData.changePercent,
-                    volume: marketData.volume
+                    change: marketData.changePercent
                 });
             } else {
                 updateResults.push({
@@ -83,7 +81,7 @@ export default async function handler(req, res) {
         
         // 5. 查询更新后的数据
         const { rows: updatedStocks } = await client.query(`
-            SELECT ticker, current_price, change_percent, volume, updated_at 
+            SELECT ticker, last_price, change_percent, last_updated 
             FROM stocks 
             WHERE ticker = ANY($1)
         `, [companies.map(c => c.ticker)]);
