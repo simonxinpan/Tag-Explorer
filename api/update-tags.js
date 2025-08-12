@@ -177,39 +177,10 @@ export default async function handler(req, res) {
         
         // 注意：volume字段在当前数据库结构中不存在，跳过成交量相关标签
 
-        // 🏭 行业分类 (基于已有数据库sector字段)
-        const { rows: sectorData } = await client.query(`
-            SELECT sector, array_agg(ticker) as tickers, count(*) as count 
-            FROM stocks WHERE sector IS NOT NULL 
-            GROUP BY sector HAVING count(*) >= 10
-        `);
+        // 注意：sector、index_member等字段在当前数据库结构中不存在，跳过相关标签
         
-        for (const sector of sectorData) {
-            let sectorName = sector.sector;
-            if (sectorName.includes('Technology')) sectorName = '科技股';
-            else if (sectorName.includes('Financial')) sectorName = '金融股';
-            else if (sectorName.includes('Healthcare')) sectorName = '医疗保健';
-            else if (sectorName.includes('Energy')) sectorName = '能源股';
-            else if (sectorName.includes('Consumer')) sectorName = '消费品';
-            
-            await applyTag(sectorName, '🏭 行业分类', sector.tickers, client);
-        }
-
-        // ⭐ 特殊名单类 (基于已有数据库index_member字段)
-        const { rows: sp500 } = await client.query(`SELECT ticker FROM stocks WHERE index_member LIKE '%SP500%'`);
-        await applyTag('标普500', '⭐ 特殊名单类', sp500.map(s => s.ticker), client);
-        
-        const { rows: nasdaq100 } = await client.query(`SELECT ticker FROM stocks WHERE index_member LIKE '%NASDAQ100%'`);
-        await applyTag('纳斯达克100', '⭐ 特殊名单类', nasdaq100.map(s => s.ticker), client);
-        
-        const { rows: dow30 } = await client.query(`SELECT ticker FROM stocks WHERE index_member LIKE '%DOW30%'`);
-        await applyTag('道琼斯', '⭐ 特殊名单类', dow30.map(s => s.ticker), client);
-        
-        // ESG评级高和分析师推荐 (基于财务指标)
-        const esgStocks = allStockData.filter(s => s.roe > 10 && s.debt_to_equity < 0.5 && s.dividend_yield > 1).sort((a,b) => b.roe - a.roe).slice(0, 89).map(s => s.ticker);
-        await applyTag('ESG评级高', '⭐ 特殊名单类', esgStocks, client);
-        
-        const analystRecommendStocks = allStockData.filter(s => s.pe > 0 && s.pe < 25 && s.roe > 8).sort((a,b) => b.roe - a.roe).slice(0, 120).map(s => s.ticker);
+        // 基于现有字段的简化标签
+        const analystRecommendStocks = allStockData.filter(s => s.pe_ttm > 0 && s.pe_ttm < 25 && s.roe_ttm > 8).sort((a,b) => b.roe_ttm - a.roe_ttm).slice(0, 50).map(s => s.ticker);
         await applyTag('分析师推荐', '⭐ 特殊名单类', analystRecommendStocks, client);
 
         await client.query('COMMIT');
