@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>标签广场 - StockLink</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .tag-link { transition: all 0.2s ease-in-out; }
+        .tag-link:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .stock-list-item a { transition: background-color 0.2s ease; }
+        .stock-list-item a:hover { background-color: #f9fafb; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans" x-data="tagsApp()" x-init="init()">
+     
+    <header class="bg-white shadow-sm">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <h1 class="text-3xl font-bold text-gray-800">标签广场</h1>
+            <p class="text-sm text-gray-500">通过智能标签，发现具有特定市场特征和财务表现的股票集群</p>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto p-4 sm:p-6 lg:px-8">
+        <div x-show="loading" class="text-center text-gray-500 py-16"><div class="animate-pulse">正在加载标签数据...</div></div>
+        <div x-show="error" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded" x-text="error" x-cloak></div>
+
+        <div x-show="!loading && !error" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8" x-cloak>
+            <template x-for="group in tagGroups" :key="group.type">
+                <section>
+                    <h2 class="text-xl font-semibold text-gray-700 border-b pb-2 mb-4" x-text="group.type"></h2>
+                    <div class="flex flex-wrap gap-3">
+                        <template x-for="tag in group.tags" :key="tag.name">
+                            <a :href="`#${tag.name}`" @click.prevent="selectTag(tag.name)" class="tag-link px-4 py-2 bg-white border rounded-full text-sm font-medium flex items-center" 
+                               :class="tag.type === '动态' ? 'border-blue-200 text-blue-800 hover:bg-blue-50' : 'border-gray-300 text-gray-700 hover:bg-gray-50'">
+                                <span x-text="tag.name"></span>
+                                <span class="ml-2 text-xs text-white rounded-full px-2 py-0.5" 
+                                      :class="tag.type === '动态' ? 'bg-blue-500' : 'bg-gray-400'" 
+                                      x-text="tag.stock_count"></span>
+                            </a>
+                        </template>
+                    </div>
+                </section>
+            </template>
+        </div>
+         
+        <div x-show="selectedTag" class="mt-12 bg-white p-6 rounded-lg shadow-md" x-cloak>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-2xl font-bold text-gray-800">标签: <span class="text-blue-600" x-text="selectedTag"></span></h3>
+                <button @click="selectedTag = null; window.location.hash = ''" class="text-sm text-gray-500 hover:text-gray-800">×</button>
+            </div>
+            <div x-show="tagStocksLoading" class="text-center text-gray-500 animate-pulse">正在加载股票列表...</div>
+            <div x-show="!tagStocksLoading && tagStocks.length === 0" class="text-center text-gray-500 py-4">该标签下暂无股票。</div>
+            <ul x-show="!tagStocksLoading && tagStocks.length > 0" class="space-y-2">
+                <template x-for="stock in tagStocks" :key="stock.ticker">
+                    <li class="stock-list-item"><a :href="`https://stock-details-final.vercel.app/?symbol=${stock.ticker}`" target="_blank" rel="noopener noreferrer" class="flex justify-between items-center p-3 rounded-md"><div><span class="font-semibold text-gray-900" x-text="stock.name_zh"></span><span class="ml-2 text-sm text-gray-500" x-text="stock.ticker"></span></div><span class="font-medium text-sm" :class="stock.change_percent >= 0 ? 'text-green-600' : 'text-red-600'" x-text="`(${(stock.change_percent || 0) > 0 ? '+' : ''}${(stock.change_percent || 0).toFixed(2)}%)`"></span></a></li>
+                </template>
+            </ul>
+        </div>
+    </main>
+    <script>
+        function tagsApp() {
+            return {
+                loading: true, error: null,
+                tagGroups: [],
+                selectedTag: null, tagStocks: [], tagStocksLoading: false,
+                 
+                async init() {
+                    this.loading = true; this.error = null;
+                    try {
+                        const allTags = await this.fetchData('/api/tags');
+                         
+                        const groups = allTags.reduce((acc, tag) => {
+                            const type = tag.type.includes('类') ? tag.type : `${tag.type}类`; // 统一类别名称
+                            if (!acc[type]) acc[type] = [];
+                            acc[type].push(tag);
+                            return acc;
+                        }, {});
+
+                        this.tagGroups = Object.keys(groups).map(type => ({ type, tags: groups[type] }));
+                         
+                        if(window.location.hash) {
+                           await this.selectTag(decodeURIComponent(window.location.hash.substring(1)));
+                        }
+                    } catch(e) { this.error = e.message; }
+                    finally { this.loading = false; }
+                },
+                async selectTag(tagName) {
+                    this.selectedTag = tagName;
+                    window.location.hash = tagName;
+                    this.tagStocksLoading = true; this.tagStocks = [];
+                    try {
+                        this.tagStocks = await this.fetchData(`/api/tags?tag_name=${encodeURIComponent(tagName)}`);
+                    } catch(e) { this.error = `Failed to load stocks for tag ${tagName}: ${e.message}`; }
+                    finally { this.tagStocksLoading = false; }
+                },
+                async fetchData(url) {
+                    const res = await fetch(url);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                    return await res.json();
+                }
+            };
+        }
+    </script>
+</body>
+</html>

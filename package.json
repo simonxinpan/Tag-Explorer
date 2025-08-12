@@ -1,0 +1,12 @@
+{
+  "name": "tag-explorer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A smart tagging system for discovering stock clusters.",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "pg": "^8.11.3"
+  }
+}
