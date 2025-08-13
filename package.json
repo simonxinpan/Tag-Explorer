@@ -7,7 +7,11 @@
     "dev": "vercel dev"
   },
   "dependencies": {
-    "pg": "^8.11.3"
+    "@mozilla/readability": "^0.6.0",
+    "@volcengine/openapi": "^1.30.2",
+    "cheerio": "^1.1.2",
+    "jsdom": "^26.1.0",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.16",
