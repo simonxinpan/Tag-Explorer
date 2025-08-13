@@ -47,8 +47,14 @@ export default async function handler(req, res) {
     try {
         console.log("Starting full data update...");
         
-        // 1. 清除所有动态标签
-        await client.query("DELETE FROM stock_tags WHERE tag_type = 'dynamic'");
+        // 1. 清除所有动态标签（通过tags表的type字段）
+        await client.query(`
+            DELETE FROM stock_tags 
+            WHERE tag_id IN (
+                SELECT id FROM tags 
+                WHERE type NOT IN ('行业分类', '特殊名单类')
+            )
+        `);
         console.log("Cleared existing dynamic tags.");
         
         // 2. 获取所有股票
