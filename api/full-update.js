@@ -29,17 +29,35 @@ async function getFinnhubMetrics(symbol, apiKey) {
 async function applyTag(tagName, tagType, tickers, client) {
     if (tickers.length === 0) return;
     
-    // 先删除该标签的所有记录
-    await client.query('DELETE FROM stock_tags WHERE tag_name = $1', [tagName]);
+    // 1. 查找或创建标签
+    let tagId;
+    const { rows: existingTag } = await client.query(
+        'SELECT id FROM tags WHERE name = $1', [tagName]
+    );
     
-    // 批量插入新标签
-    const values = tickers.map((ticker, i) => `($${i*3+1}, $${i*3+2}, $${i*3+3})`).join(',');
-    const params = tickers.flatMap(ticker => [ticker, tagName, tagType]);
+    if (existingTag.length > 0) {
+        tagId = existingTag[0].id;
+    } else {
+        const { rows: newTag } = await client.query(
+            'INSERT INTO tags (name, type) VALUES ($1, $2) RETURNING id',
+            [tagName, tagType]
+        );
+        tagId = newTag[0].id;
+    }
     
-    await client.query(`
-        INSERT INTO stock_tags (ticker, tag_name, tag_type) 
-        VALUES ${values}
-    `, params);
+    // 2. 删除该标签的所有现有关联
+    await client.query('DELETE FROM stock_tags WHERE tag_id = $1', [tagId]);
+    
+    // 3. 批量插入新的股票-标签关联
+    if (tickers.length > 0) {
+        const values = tickers.map((_, i) => `($${i*2+1}, $${i*2+2})`).join(',');
+        const params = tickers.flatMap(ticker => [ticker, tagId]);
+        
+        await client.query(`
+            INSERT INTO stock_tags (stock_ticker, tag_id) 
+            VALUES ${values}
+        `, params);
+    }
 }
 
 export default async function handler(req, res) {
