@@ -6,15 +6,24 @@ export default async function handler(req, res) {
     const client = await pool.connect();
     try {
         // 查询stock_tags表结构
-        const { rows: columns } = await client.query(`
+        const { rows: stockTagsColumns } = await client.query(`
             SELECT column_name, data_type, is_nullable 
             FROM information_schema.columns 
             WHERE table_name = 'stock_tags' 
             ORDER BY ordinal_position
         `);
         
+        // 查询tags表结构
+        const { rows: tagsColumns } = await client.query(`
+            SELECT column_name, data_type, is_nullable 
+            FROM information_schema.columns 
+            WHERE table_name = 'tags' 
+            ORDER BY ordinal_position
+        `);
+        
         // 查询前5条数据示例
-        const { rows: sampleData } = await client.query('SELECT * FROM stock_tags LIMIT 5');
+        const { rows: stockTagsSampleData } = await client.query('SELECT * FROM stock_tags LIMIT 5');
+        const { rows: tagsSampleData } = await client.query('SELECT * FROM tags LIMIT 5');
         
         // 查询所有表名
         const { rows: tables } = await client.query(`
@@ -25,8 +34,10 @@ export default async function handler(req, res) {
         
         res.status(200).json({
             success: true,
-            stockTagsSchema: columns,
-            sampleData,
+            stockTagsSchema: stockTagsColumns,
+            tagsSchema: tagsColumns,
+            stockTagsSampleData,
+            tagsSampleData,
             allTables: tables.map(t => t.table_name)
         });
     } catch (error) {
