@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lint": "next lint",
+    "export": "next export",
+    "analyze": "cross-env ANALYZE=true next build"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
