@@ -1,11 +1,6 @@
 // 文件路径: pages/admin/health.js
 
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Activity, 
   Database, 
@@ -49,13 +44,11 @@ export default function HealthMonitor() {
   // 获取更新统计
   const fetchUpdateStats = async () => {
     try {
-      const { data, error } = await supabase
-        .from('update_stats')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (error) throw error;
+      const response = await fetch('/api/update-stats');
+      if (!response.ok) {
+        throw new Error('Failed to fetch update stats');
+      }
+      const data = await response.json();
       setUpdateStats(data || []);
     } catch (err) {
       console.error('Update stats fetch error:', err);
@@ -158,53 +151,52 @@ export default function HealthMonitor() {
             <p className="text-gray-600 mt-1">实时监控系统数据质量和更新状态</p>
           </div>
           <div className="flex space-x-3">
-            <Button 
+            <button 
               onClick={handleRefresh} 
               disabled={refreshing}
-              variant="outline"
+              className="flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
               刷新
-            </Button>
-            <Button 
+            </button>
+            <button 
               onClick={() => triggerUpdate('standard')} 
               disabled={refreshing}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               <Activity className="h-4 w-4 mr-2" />
               标准更新
-            </Button>
-            <Button 
+            </button>
+            <button 
               onClick={() => triggerUpdate('batch')} 
               disabled={refreshing}
-              variant="secondary"
+              className="flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50"
             >
               <Database className="h-4 w-4 mr-2" />
               批量更新
-            </Button>
+            </button>
           </div>
         </div>
 
         {/* 错误提示 */}
         {error && (
-          <Alert className="border-red-200 bg-red-50">
-            <AlertTriangle className="h-4 w-4 text-red-600" />
-            <AlertDescription className="text-red-800">
-              {error}
-            </AlertDescription>
-          </Alert>
+          <div className="border border-red-200 bg-red-50 p-4 rounded-lg">
+            <div className="flex items-center">
+              <AlertTriangle className="h-4 w-4 text-red-600 mr-2" />
+              <span className="text-red-800">{error}</span>
+            </div>
+          </div>
         )}
 
         {healthData && (
           <>
             {/* 总体健康状态 */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Activity className="h-5 w-5 mr-2" />
-                  总体健康状态
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center mb-4">
+                <Activity className="h-5 w-5 mr-2" />
+                <h2 className="text-xl font-semibold">总体健康状态</h2>
+              </div>
+              <div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-4">
                     <div className={`p-3 rounded-full ${healthStatus.color}`}>
@@ -226,10 +218,12 @@ export default function HealthMonitor() {
                 </div>
                 
                 <div className="mt-4">
-                  <Progress 
-                    value={healthData.summary.overall_health_score} 
-                    className="h-2"
-                  />
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${healthData.summary.overall_health_score}%` }}
+                    />
+                  </div>
                 </div>
                 
                 {healthData.summary.recommendations.length > 0 && (
@@ -242,157 +236,159 @@ export default function HealthMonitor() {
                     </ul>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
 
             {/* 详细指标 */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {/* 数据完整性 */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center">
-                    <Database className="h-4 w-4 mr-2" />
-                    数据完整性
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl font-bold">
-                        {healthData.metrics.data_completeness.rate.toFixed(1)}%
-                      </span>
-                      <Badge className={getMetricColor(healthData.metrics.data_completeness.status)}>
-                        {healthData.metrics.data_completeness.status}
-                      </Badge>
-                    </div>
-                    <Progress value={healthData.metrics.data_completeness.rate} className="h-1" />
-                    <div className="text-xs text-gray-500">
-                      完整: {healthData.metrics.data_completeness.complete_stocks.toLocaleString()} | 
-                      缺失: {healthData.metrics.data_completeness.incomplete_stocks.toLocaleString()}
-                    </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-3">
+                  <Database className="h-4 w-4 mr-2" />
+                  <h3 className="text-sm font-medium">数据完整性</h3>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-bold">
+                      {healthData.metrics.data_completeness.rate.toFixed(1)}%
+                    </span>
+                    <span className={`px-2 py-1 rounded text-sm ${getMetricColor(healthData.metrics.data_completeness.status)}`}>
+                      {healthData.metrics.data_completeness.status}
+                    </span>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="w-full bg-gray-200 rounded-full h-1">
+                    <div 
+                      className="bg-green-600 h-1 rounded-full transition-all duration-300"
+                      style={{ width: `${healthData.metrics.data_completeness.rate}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    完整: {healthData.metrics.data_completeness.complete_stocks.toLocaleString()} | 
+                    缺失: {healthData.metrics.data_completeness.incomplete_stocks.toLocaleString()}
+                  </div>
+                </div>
+              </div>
 
               {/* 数据新鲜度 */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center">
-                    <Clock className="h-4 w-4 mr-2" />
-                    数据新鲜度
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl font-bold">
-                        {healthData.metrics.data_freshness.rate.toFixed(1)}%
-                      </span>
-                      <Badge className={getMetricColor(healthData.metrics.data_freshness.status)}>
-                        {healthData.metrics.data_freshness.status}
-                      </Badge>
-                    </div>
-                    <Progress value={healthData.metrics.data_freshness.rate} className="h-1" />
-                    <div className="text-xs text-gray-500">
-                      新鲜: {healthData.metrics.data_freshness.fresh_stocks.toLocaleString()} | 
-                      过期: {healthData.metrics.data_freshness.stale_stocks.toLocaleString()}
-                    </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-3">
+                  <Clock className="h-4 w-4 mr-2" />
+                  <h3 className="text-sm font-medium">数据新鲜度</h3>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-bold">
+                      {healthData.metrics.data_freshness.rate.toFixed(1)}%
+                    </span>
+                    <span className={`px-2 py-1 rounded text-sm ${getMetricColor(healthData.metrics.data_freshness.status)}`}>
+                      {healthData.metrics.data_freshness.status}
+                    </span>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="w-full bg-gray-200 rounded-full h-1">
+                    <div 
+                      className="bg-blue-600 h-1 rounded-full transition-all duration-300"
+                      style={{ width: `${healthData.metrics.data_freshness.rate}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    新鲜: {healthData.metrics.data_freshness.fresh_stocks.toLocaleString()} | 
+                    过期: {healthData.metrics.data_freshness.stale_stocks.toLocaleString()}
+                  </div>
+                </div>
+              </div>
 
               {/* 数据质量 */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center">
-                    <BarChart3 className="h-4 w-4 mr-2" />
-                    数据质量
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl font-bold">
-                        {healthData.metrics.data_quality.rate.toFixed(1)}%
-                      </span>
-                      <Badge className={getMetricColor(healthData.metrics.data_quality.status)}>
-                        {healthData.metrics.data_quality.status}
-                      </Badge>
-                    </div>
-                    <Progress value={healthData.metrics.data_quality.rate} className="h-1" />
-                    <div className="text-xs text-gray-500">
-                      正常: {healthData.metrics.data_quality.normal_stocks.toLocaleString()} | 
-                      异常: {healthData.metrics.data_quality.anomalous_stocks.toLocaleString()}
-                    </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-3">
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                  <h3 className="text-sm font-medium">数据质量</h3>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-bold">
+                      {healthData.metrics.data_quality.rate.toFixed(1)}%
+                    </span>
+                    <span className={`px-2 py-1 rounded text-sm ${getMetricColor(healthData.metrics.data_quality.status)}`}>
+                      {healthData.metrics.data_quality.status}
+                    </span>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="w-full bg-gray-200 rounded-full h-1">
+                    <div 
+                      className="bg-purple-600 h-1 rounded-full transition-all duration-300"
+                      style={{ width: `${healthData.metrics.data_quality.rate}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    正常: {healthData.metrics.data_quality.normal_stocks.toLocaleString()} | 
+                    异常: {healthData.metrics.data_quality.anomalous_stocks.toLocaleString()}
+                  </div>
+                </div>
+              </div>
 
               {/* 标签覆盖率 */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center">
-                    <Tag className="h-4 w-4 mr-2" />
-                    标签覆盖率
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl font-bold">
-                        {healthData.metrics.tag_coverage.rate.toFixed(1)}%
-                      </span>
-                      <Badge className={getMetricColor(healthData.metrics.tag_coverage.status)}>
-                        {healthData.metrics.tag_coverage.status}
-                      </Badge>
-                    </div>
-                    <Progress value={healthData.metrics.tag_coverage.rate} className="h-1" />
-                    <div className="text-xs text-gray-500">
-                      已标记: {healthData.metrics.tag_coverage.tagged_stocks.toLocaleString()} | 
-                      未标记: {healthData.metrics.tag_coverage.untagged_stocks.toLocaleString()}
-                    </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-3">
+                  <Tag className="h-4 w-4 mr-2" />
+                  <h3 className="text-sm font-medium">标签覆盖率</h3>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xl font-bold">
+                      {healthData.metrics.tag_coverage.rate.toFixed(1)}%
+                    </span>
+                    <span className={`px-2 py-1 rounded text-sm ${getMetricColor(healthData.metrics.tag_coverage.status)}`}>
+                      {healthData.metrics.tag_coverage.status}
+                    </span>
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="w-full bg-gray-200 rounded-full h-1">
+                    <div 
+                      className="bg-orange-600 h-1 rounded-full transition-all duration-300"
+                      style={{ width: `${healthData.metrics.tag_coverage.rate}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    已标记: {healthData.metrics.tag_coverage.tagged_stocks.toLocaleString()} | 
+                    未标记: {healthData.metrics.tag_coverage.untagged_stocks.toLocaleString()}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* 最近更新历史 */}
             {updateStats.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Calendar className="h-5 w-5 mr-2" />
-                    最近更新历史
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {updateStats.map((stat) => (
-                      <div key={stat.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center space-x-3">
-                          <Badge variant={stat.update_type === 'batch' ? 'destructive' : 'default'}>
-                            {stat.update_type}
-                          </Badge>
-                          <div>
-                            <div className="font-medium">
-                              {stat.success_count}/{stat.total_stocks} 成功
-                            </div>
-                            <div className="text-sm text-gray-500">
-                              {new Date(stat.created_at).toLocaleString('zh-CN')}
-                            </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-4">
+                  <Calendar className="h-5 w-5 mr-2" />
+                  <h2 className="text-xl font-semibold">最近更新历史</h2>
+                </div>
+                <div className="space-y-3">
+                  {updateStats.map((stat) => (
+                    <div key={stat.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div className="flex items-center space-x-3">
+                        <span className={`px-2 py-1 rounded text-sm ${
+                          stat.update_type === 'batch' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {stat.update_type}
+                        </span>
+                        <div>
+                          <div className="font-medium">
+                            {stat.success_count}/{stat.total_stocks} 成功
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="font-medium">{stat.duration_seconds}s</div>
                           <div className="text-sm text-gray-500">
-                            {Math.round((stat.success_count / stat.total_stocks) * 100)}% 成功率
+                            {new Date(stat.created_at).toLocaleString('zh-CN')}
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+                      <div className="text-right">
+                        <div className="font-medium">{stat.duration_seconds}s</div>
+                        <div className="text-sm text-gray-500">
+                          {Math.round((stat.success_count / stat.total_stocks) * 100)}% 成功率
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </>
         )}

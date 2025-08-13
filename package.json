@@ -4,14 +4,21 @@
   "private": true,
   "description": "A smart tagging system for discovering stock clusters.",
   "scripts": {
-    "dev": "vercel dev"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "@supabase/supabase-js": "^2.55.0",
     "@volcengine/openapi": "^1.30.2",
     "cheerio": "^1.1.2",
     "jsdom": "^26.1.0",
-    "pg": "^8.16.3"
+    "lucide-react": "^0.539.0",
+    "next": "^15.4.6",
+    "pg": "^8.16.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.16",

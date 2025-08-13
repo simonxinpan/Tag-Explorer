@@ -1,6 +1,6 @@
 // 文件路径: pages/api/data-health.js
 
-import { supabase } from '../../lib/supabase';
+import { Database } from '../../lib/db';
 
 /**
  * 数据健康监控API
@@ -16,82 +16,27 @@ export default async function handler(req, res) {
     const startTime = Date.now();
 
     // 1. 基础数据统计
-    const { data: totalStocks, error: totalError } = await supabase
-      .from('stocks')
-      .select('ticker', { count: 'exact', head: true });
-
-    if (totalError) {
-      throw new Error(`Failed to count stocks: ${totalError.message}`);
-    }
-
-    const totalCount = totalStocks || 0;
+    const stats = await Database.getDataStats();
+    const totalCount = stats.totalStocks;
 
     // 2. 检查数据完整性
-    const { data: incompleteStocks, error: incompleteError } = await supabase
-      .from('stocks')
-      .select('ticker', { count: 'exact', head: true })
-      .or('price.is.null,change_amount.is.null,change_percent.is.null');
-
-    if (incompleteError) {
-      throw new Error(`Failed to check incomplete data: ${incompleteError.message}`);
-    }
-
-    const incompleteCount = incompleteStocks || 0;
-    const completenessRate = totalCount > 0 ? ((totalCount - incompleteCount) / totalCount) * 100 : 0;
+    const incompleteCount = stats.incompleteStocks;
+    const completenessRate = stats.completeness;
 
     // 3. 检查数据新鲜度（24小时内更新的数据）
-    const yesterday = new Date();
-    yesterday.setHours(yesterday.getHours() - 24);
-
-    const { data: freshStocks, error: freshError } = await supabase
-      .from('stocks')
-      .select('ticker', { count: 'exact', head: true })
-      .gte('last_updated', yesterday.toISOString());
-
-    if (freshError) {
-      throw new Error(`Failed to check data freshness: ${freshError.message}`);
-    }
-
-    const freshCount = freshStocks || 0;
-    const freshnessRate = totalCount > 0 ? (freshCount / totalCount) * 100 : 0;
+    const freshCount = stats.recentlyUpdated;
+    const freshnessRate = stats.freshness;
 
     // 4. 检查动态标签覆盖率
-    const { data: taggedStocks, error: taggedError } = await supabase
-      .from('stocks')
-      .select('ticker', { count: 'exact', head: true })
-      .not('dynamic_tags', 'is', null)
-      .neq('dynamic_tags', '[]');
-
-    if (taggedError) {
-      throw new Error(`Failed to check tag coverage: ${taggedError.message}`);
-    }
-
-    const taggedCount = taggedStocks || 0;
-    const tagCoverageRate = totalCount > 0 ? (taggedCount / totalCount) * 100 : 0;
+    const taggedCount = stats.stocksWithTags;
+    const tagCoverageRate = stats.tagCoverage;
 
     // 5. 检查异常数据（价格为0或负数）
-    const { data: anomalousStocks, error: anomalousError } = await supabase
-      .from('stocks')
-      .select('ticker', { count: 'exact', head: true })
-      .or('price.lte.0,change_percent.gt.50,change_percent.lt.-50');
-
-    if (anomalousError) {
-      throw new Error(`Failed to check anomalous data: ${anomalousError.message}`);
-    }
-
-    const anomalousCount = anomalousStocks || 0;
-    const dataQualityRate = totalCount > 0 ? ((totalCount - anomalousCount) / totalCount) * 100 : 0;
+    const anomalousCount = stats.anomalousStocks;
+    const dataQualityRate = stats.dataQuality;
 
     // 6. 获取最近的更新统计
-    const { data: recentUpdates, error: updatesError } = await supabase
-      .from('update_stats')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    if (updatesError) {
-      console.warn('Failed to fetch update stats:', updatesError.message);
-    }
+    const recentUpdates = stats.recentUpdates || [];
 
     // 7. 计算综合健康分数
     const weights = {

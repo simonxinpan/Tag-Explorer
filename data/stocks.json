@@ -1,0 +1,192 @@
+[
+  {
+    "symbol": "AAPL",
+    "name": "Apple Inc.",
+    "last_price": 195.89,
+    "change_amount": 2.45,
+    "change_percent": 1.27,
+    "market_cap": 3000000000000,
+    "volume": 45678900,
+    "sector": "Technology",
+    "industry": "Consumer Electronics",
+    "tags": [
+      "大盘股",
+      "科技股",
+      "消费电子",
+      "创新领导者",
+      "高分红"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "MSFT",
+    "name": "Microsoft Corporation",
+    "last_price": 378.85,
+    "change_amount": -1.23,
+    "change_percent": -0.32,
+    "market_cap": 2800000000000,
+    "volume": 23456789,
+    "sector": "Technology",
+    "industry": "Software",
+    "tags": [
+      "大盘股",
+      "科技股",
+      "云计算",
+      "企业软件",
+      "稳定增长"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "GOOGL",
+    "name": "Alphabet Inc.",
+    "last_price": 142.56,
+    "change_amount": 0.89,
+    "change_percent": 0.63,
+    "market_cap": 1800000000000,
+    "volume": 34567890,
+    "sector": "Technology",
+    "industry": "Internet Services",
+    "tags": [
+      "大盘股",
+      "科技股",
+      "搜索引擎",
+      "广告技术",
+      "人工智能"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "AMZN",
+    "name": "Amazon.com Inc.",
+    "last_price": 155.74,
+    "change_amount": 3.21,
+    "change_percent": 2.1,
+    "market_cap": 1600000000000,
+    "volume": 56789012,
+    "sector": "Consumer Discretionary",
+    "industry": "E-commerce",
+    "tags": [
+      "大盘股",
+      "电商",
+      "云计算",
+      "物流",
+      "创新"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "TSLA",
+    "name": "Tesla Inc.",
+    "last_price": 248.42,
+    "change_amount": -5.67,
+    "change_percent": -2.23,
+    "market_cap": 800000000000,
+    "volume": 78901234,
+    "sector": "Consumer Discretionary",
+    "industry": "Electric Vehicles",
+    "tags": [
+      "成长股",
+      "电动汽车",
+      "清洁能源",
+      "自动驾驶",
+      "高波动"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "NVDA",
+    "name": "NVIDIA Corporation",
+    "last_price": 875.28,
+    "change_amount": 12.45,
+    "change_percent": 1.44,
+    "market_cap": 2200000000000,
+    "volume": 45678901,
+    "sector": "Technology",
+    "industry": "Semiconductors",
+    "tags": [
+      "成长股",
+      "半导体",
+      "人工智能",
+      "游戏",
+      "数据中心"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "META",
+    "name": "Meta Platforms Inc.",
+    "last_price": 484.52,
+    "change_amount": 7.89,
+    "change_percent": 1.66,
+    "market_cap": 1200000000000,
+    "volume": 23456789,
+    "sector": "Technology",
+    "industry": "Social Media",
+    "tags": [
+      "大盘股",
+      "社交媒体",
+      "元宇宙",
+      "广告技术",
+      "虚拟现实"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "NFLX",
+    "name": "Netflix Inc.",
+    "last_price": 486.81,
+    "change_amount": -2.34,
+    "change_percent": -0.48,
+    "market_cap": 210000000000,
+    "volume": 12345678,
+    "sector": "Communication Services",
+    "industry": "Streaming",
+    "tags": [
+      "中盘股",
+      "流媒体",
+      "内容制作",
+      "订阅模式",
+      "全球化"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "CRM",
+    "name": "Salesforce Inc.",
+    "last_price": 267.89,
+    "change_amount": 4.56,
+    "change_percent": 1.73,
+    "market_cap": 260000000000,
+    "volume": 8901234,
+    "sector": "Technology",
+    "industry": "Cloud Software",
+    "tags": [
+      "大盘股",
+      "SaaS",
+      "客户关系管理",
+      "云计算",
+      "企业软件"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  },
+  {
+    "symbol": "AMD",
+    "name": "Advanced Micro Devices",
+    "last_price": 142.67,
+    "change_amount": 1.89,
+    "change_percent": 1.34,
+    "market_cap": 230000000000,
+    "volume": 34567890,
+    "sector": "Technology",
+    "industry": "Semiconductors",
+    "tags": [
+      "大盘股",
+      "半导体",
+      "CPU",
+      "GPU",
+      "数据中心"
+    ],
+    "last_updated": "2025-08-13T17:33:26.775Z"
+  }
+]
