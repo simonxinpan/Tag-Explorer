@@ -1,0 +1,31 @@
+# 文件路径: .github/workflows/scheduled_update.yml
+
+# 工作流的名称，会显示在 GitHub Actions 页面
+name: Update Stock Data & Dynamic Tags
+
+# 定义触发条件
+on:
+  # 1. 定时触发：每天 UTC 时间 8点 (北京时间下午4点) 运行一次
+  # 这个时间点美股已收盘，可以获取到完整的前一日数据
+  schedule:
+    - cron: '0 8 * * *'
+    
+  # 2. 手动触发：在 GitHub Actions 页面显示 "Run workflow" 按钮
+  workflow_dispatch:
+
+# 定义要执行的任务
+jobs:
+  update-data-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel API to trigger data update
+        # 使用 GitHub Secrets 来安全地存储敏感信息
+        env:
+          DEPLOYMENT_URL: ${{ secrets.VERCEL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        # 运行 curl 命令，调用我们后端的“数据工人” API
+        # --fail 参数确保在 API 返回错误时，Action 也会失败
+        run: |
+          curl --fail -X GET \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$DEPLOYMENT_URL/api/update-data"
