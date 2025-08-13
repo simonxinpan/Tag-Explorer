@@ -1,7 +1,7 @@
 # 文件路径: .github/workflows/scheduled_update.yml
 
 # 工作流的名称，会显示在 GitHub Actions 页面
-name: Update Stock Data & Dynamic Tags
+name: Comprehensive Stock Data Update
 
 # 定义触发条件
 on:
@@ -12,20 +12,102 @@ on:
     
   # 2. 手动触发：在 GitHub Actions 页面显示 "Run workflow" 按钮
   workflow_dispatch:
+    inputs:
+      update_type:
+        description: 'Update type'
+        required: true
+        default: 'standard'
+        type: choice
+        options:
+        - standard
+        - batch
+        - tags-only
 
 # 定义要执行的任务
 jobs:
-  update-data-job:
+  # 数据健康检查
+  health-check:
     runs-on: ubuntu-latest
+    outputs:
+      health-score: ${{ steps.check.outputs.health-score }}
     steps:
-      - name: Call Vercel API to trigger data update
-        # 使用 GitHub Secrets 来安全地存储敏感信息
+      - name: Check data health status
+        id: check
+        env:
+          DEPLOYMENT_URL: ${{ secrets.VERCEL_URL }}
+        run: |
+          response=$(curl -s "$DEPLOYMENT_URL/api/data-health")
+          health_score=$(echo $response | jq -r '.summary.overall_health_score')
+          echo "health-score=$health_score" >> $GITHUB_OUTPUT
+          echo "Current data health score: $health_score"
+  
+  # 标准数据更新任务
+  standard-update:
+    needs: health-check
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.update_type == 'standard' || github.event.inputs.update_type == '' }}
+    steps:
+      - name: Standard data and tags update
         env:
           DEPLOYMENT_URL: ${{ secrets.VERCEL_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        # 运行 curl 命令，调用我们后端的“数据工人” API
-        # --fail 参数确保在 API 返回错误时，Action 也会失败
         run: |
+          echo "Running standard update..."
           curl --fail -X GET \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "$DEPLOYMENT_URL/api/update-data"
+            "$DEPLOYMENT_URL/api/update-tags"
+  
+  # 批量数据更新任务（当数据健康分数低于70时自动触发）
+  batch-update:
+    needs: health-check
+    runs-on: ubuntu-latest
+    if: ${{ needs.health-check.outputs.health-score < 70 || github.event.inputs.update_type == 'batch' }}
+    steps:
+      - name: Batch data update for data recovery
+        env:
+          DEPLOYMENT_URL: ${{ secrets.VERCEL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "Running batch update due to low health score: ${{ needs.health-check.outputs.health-score }}"
+          curl --fail -X GET \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$DEPLOYMENT_URL/api/batch-update"
+  
+  # 仅标签更新任务
+  tags-only-update:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.update_type == 'tags-only' }}
+    steps:
+      - name: Update dynamic tags only
+        env:
+          DEPLOYMENT_URL: ${{ secrets.VERCEL_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "Running tags-only update..."
+          # 这里可以调用一个专门的标签更新API
+          curl --fail -X GET \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$DEPLOYMENT_URL/api/update-tags"
+  
+  # 更新后的健康检查
+  post-update-health:
+    needs: [health-check, standard-update, batch-update]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Post-update health check
+        env:
+          DEPLOYMENT_URL: ${{ secrets.VERCEL_URL }}
+        run: |
+          echo "Checking data health after update..."
+          response=$(curl -s "$DEPLOYMENT_URL/api/data-health")
+          new_health_score=$(echo $response | jq -r '.summary.overall_health_score')
+          echo "Previous health score: ${{ needs.health-check.outputs.health-score }}"
+          echo "New health score: $new_health_score"
+          
+          # 如果健康分数有显著改善，输出成功信息
+          if [ "$new_health_score" -gt "${{ needs.health-check.outputs.health-score }}" ]; then
+            echo "✅ Data health improved!"
+          else
+            echo "⚠️ Data health needs attention"
+          fi
