@@ -4,15 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>标签广场 - StockLink</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="./output.css">
     <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
-    <style>
-        [x-cloak] { display: none !important; }
-        .tag-link { transition: all 0.2s ease-in-out; }
-        .tag-link:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .stock-list-item a { transition: background-color 0.2s ease; }
-        .stock-list-item a:hover { background-color: #f9fafb; }
-    </style>
 </head>
 <body class="bg-gray-100 font-sans" x-data="tagsApp()" x-init="init()">
      

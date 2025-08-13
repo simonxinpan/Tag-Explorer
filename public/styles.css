@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 自定义样式 */
+[x-cloak] { display: none !important; }
+.tag-link { transition: all 0.2s ease-in-out; }
+.tag-link:hover { transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+.stock-list-item a { transition: background-color 0.2s ease; }
+.stock-list-item a:hover { background-color: #f9fafb; }
