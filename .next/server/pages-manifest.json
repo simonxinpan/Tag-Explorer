@@ -3,5 +3,7 @@
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
   "/": "pages/index.js",
-  "/api/data-health": "pages/api/data-health.js"
+  "/api/data-health": "pages/api/data-health.js",
+  "/admin/health": "pages/admin/health.js",
+  "/api/update-stats": "pages/api/update-stats.js"
 }
