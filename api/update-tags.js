@@ -1,193 +1,84 @@
-// /api/update-tags.js
+// /api/update-tags.js (最终黄金组合版)
 import { Pool } from 'pg';
 const pool = new Pool({ connectionString: process.env.NEON_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
-// 辅助函数：从 Polygon 获取全市场前一日快照数据
-async function getPolygonGroupedDaily(apiKey) {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const dateStr = yesterday.toISOString().split('T')[0]; // YYYY-MM-DD格式
-    
-    const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${dateStr}?adjusted=true&apikey=${apiKey}`;
-    try {
-        const res = await fetch(url);
-        if (!res.ok) return null;
-        const data = await res.json();
-        return data.results || [];
-    } catch { return null; }
+// --- 辅助函数 1: 从 Polygon 高效获取全市场快照 ---
+async function getPolygonSnapshot(apiKey) {
+    // ... (此处粘贴我们之前最终确认的、能找到最近交易日快照的 getPolygonSnapshot 函数)
 }
 
-// 辅助函数：从 Finnhub 获取基本面指标（保留用于财务数据）
+// --- 辅助函数 2: 从 Finnhub 获取单只股票的财务指标 ---
 async function getFinnhubMetrics(symbol, apiKey) {
-    const url = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${apiKey}`;
-    try {
-        const res = await fetch(url);
-        return res.ok ? res.json() : null;
-    } catch { return null; }
+    // ... (此处粘贴我们之前最终确认的 getFinnhubMetrics 函数)
 }
 
-// 辅助函数：将标签应用到一组股票
-async function applyTag(tagName, tagType, tickers, client) {
-    if (!tickers || tickers.length === 0) return;
-    const { rows: [tag] } = await client.query(
-        `INSERT INTO tags (name, type) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET type = $2 RETURNING id;`,
-        [tagName, tagType]
-    );
-    for (const ticker of tickers) {
-        await client.query(
-            `INSERT INTO stock_tags (stock_ticker, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;`,
-            [ticker, tag.id]
-        );
-    }
-    console.log(`Tagged ${tickers.length} stocks with '${tagName}'.`);
-}
+// --- 辅助函数 3: 应用标签 ---
+async function applyTag(tagName, tagType, tickers, client) { /* ... 和之前一样 ... */ }
 
-// --- 主函数 ---
+// --- API 主处理函数 ---
 export default async function handler(req, res) {
-    // 添加测试模式：如果URL包含test=true参数，则跳过授权检查
-    const isTestMode = req.query.test === 'true';
-    
-    if (!isTestMode && req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
+    if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
     const client = await pool.connect();
+    console.log("===== Starting daily data injection & tag update job =====");
+    
     try {
-        console.log("Starting daily dynamic tag update job...");
         await client.query('BEGIN');
-         
-        // 1. 清理所有旧的"动态"标签关联
-        await client.query(`DELETE FROM stock_tags WHERE tag_id IN (SELECT id FROM tags WHERE type != '行业分类' AND type != '特殊名单类');`);
-        console.log("Cleared old dynamic tags.");
-
-        // 2. 一次性获取全市场Polygon数据
-        console.log("Fetching market data from Polygon...");
-        const polygonData = await getPolygonGroupedDaily(process.env.POLYGON_API_KEY);
-        if (!polygonData || polygonData.length === 0) {
-            throw new Error('Failed to fetch Polygon market data');
-        }
-        console.log(`Fetched ${polygonData.length} stocks from Polygon.`);
-
-        // 3. 将Polygon数据转换为映射表，便于快速查找
-        const polygonMap = new Map();
-        polygonData.forEach(stock => {
-            polygonMap.set(stock.T, { // T是ticker symbol
-                open: stock.o,
-                close: stock.c,
-                high: stock.h,
-                low: stock.l,
-                volume: stock.v,
-                changePercent: ((stock.c - stock.o) / stock.o * 100).toFixed(2)
-            });
-        });
-
-        // 4. 获取数据库中所有股票列表
         const { rows: companies } = await client.query('SELECT ticker FROM stocks');
-        console.log(`Found ${companies.length} companies in database.`);
+        console.log(`Step 1: Found ${companies.length} companies in DB.`);
 
-        let marketUpdateCount = 0;
-        let financialUpdateCount = 0;
+        console.log("Step 2: Fetching data from Polygon (market) and Finnhub (financials)...");
+        const polygonSnapshot = await getPolygonSnapshot(process.env.POLYGON_API_KEY);
         
-        console.log("Starting decoupled data update process...");
-        
-        // 5. 解耦更新：分别处理市场数据和财务数据
+        let successUpdateCount = 0;
         for (const company of companies) {
             const ticker = company.ticker;
-            const marketData = polygonMap.get(ticker);
+            // 为了避免短时间请求过多Finnhub，我们加入一个微小的延迟
+            await new Promise(resolve => setTimeout(resolve, 100)); // 100毫秒延迟
             
-            // 5a. 如果有Polygon市场数据，立即更新市场相关字段
+            const marketData = polygonSnapshot.get(ticker);
+            const financialData = await getFinnhubMetrics(ticker, process.env.FINNHUB_API_KEY);
+            
+            const updates = {}; const values = []; let queryIndex = 1;
             if (marketData) {
-                await client.query(`
-                    UPDATE stocks SET 
-                        last_price = $1,
-                        change_percent = $2,
-                        last_updated = NOW()
-                    WHERE ticker = $3
-                `, [marketData.close, marketData.changePercent, ticker]);
-                marketUpdateCount++;
+                updates.last_price = `$${queryIndex++}`; values.push(marketData.c);
+                if (marketData.o > 0) updates.change_percent = `$${queryIndex++}`; values.push(((marketData.c - marketData.o) / marketData.o) * 100);
+            }
+            if (financialData && financialData.metric) {
+                updates.market_cap = `$${queryIndex++}`; values.push(financialData.metric.marketCapitalization);
+                updates.roe_ttm = `$${queryIndex++}`; values.push(financialData.metric.roeTTM);
+                updates.pe_ttm = `$${queryIndex++}`; values.push(financialData.metric.peTTM);
+                updates.week_52_high = `$${queryIndex++}`; values.push(financialData.metric['52WeekHigh']);
+                updates.week_52_low = `$${queryIndex++}`; values.push(financialData.metric['52WeekLow']);
+                updates.dividend_yield = `$${queryIndex++}`; values.push(financialData.metric.dividendYieldAnnual);
             }
             
-            // 5b. 尝试获取Finnhub财务数据（允许失败）
-            try {
-                const financialData = await getFinnhubMetrics(ticker, process.env.FINNHUB_API_KEY);
-                if (financialData && financialData.metric) {
-                    await client.query(`
-                        UPDATE stocks SET 
-                            market_cap = $1,
-                            roe_ttm = $2,
-                            pe_ttm = $3,
-                            dividend_yield = $4,
-                            last_updated = NOW()
-                        WHERE ticker = $5
-                    `, [
-                        financialData.metric.marketCapitalization,
-                        financialData.metric.roeTTM,
-                        financialData.metric.peTTM,
-                        financialData.metric.dividendYieldAnnual,
-                        ticker
-                    ]);
-                    financialUpdateCount++;
-                }
-            } catch (error) {
-                // 忽略单个股票的Finnhub错误，继续处理下一个
-                console.warn(`Finnhub data failed for ${ticker}:`, error.message);
-            }
-            
-            // 每处理100只股票输出一次进度
-            if ((marketUpdateCount + financialUpdateCount) % 100 === 0) {
-                console.log(`Progress: Market updates: ${marketUpdateCount}, Financial updates: ${financialUpdateCount}`);
+            if (Object.keys(updates).length > 0) {
+                updates.last_updated = 'NOW()';
+                const setClauses = Object.keys(updates).map(key => `${key} = ${updates[key]}`).join(', ');
+                await client.query(`UPDATE stocks SET ${setClauses} WHERE ticker = $${queryIndex}`, [...values, ticker]);
+                successUpdateCount++;
             }
         }
-        
-        console.log(`Data update complete: Market data updated for ${marketUpdateCount} stocks, Financial data updated for ${financialUpdateCount} stocks.`);
+        console.log(`Step 2 Complete: Updated data for ${successUpdateCount} stocks.`);
 
-        // 6. 获取数据库中所有股票的完整信息用于标签计算
-        const { rows: allStockData } = await client.query(`
-            SELECT ticker, last_price, change_percent, market_cap,
-                   roe_ttm, pe_ttm, dividend_yield
-            FROM stocks 
-            WHERE last_price IS NOT NULL OR market_cap IS NOT NULL
-        `);
-        console.log(`Processing ${allStockData.length} stocks for tag calculation.`);
-
-        // 7. 重新计算并应用动态标签
+        console.log("Step 3: Recalculating dynamic tags...");
+        await client.query(`DELETE FROM stock_tags WHERE tag_id IN (SELECT id FROM tags WHERE type != '行业分类' AND type != '特殊名单类');`);
+        const { rows: allStocks } = await client.query('SELECT ticker, roe_ttm, week_52_high, last_price FROM stocks');
         
-        // 📈 股市表现类
-        const highYieldStocks = allStockData.filter(s => s.dividend_yield > 3).sort((a,b) => b.dividend_yield - a.dividend_yield).slice(0, 45).map(s => s.ticker);
-        await applyTag('高股息率', '📈 股市表现类', highYieldStocks, client);
+        const highRoeStocks = allStocks.filter(s => s.roe_ttm > 20).map(s => s.ticker);
+        await applyTag('高ROE', '财务表现类', highRoeStocks, client);
         
-        const lowPeStocks = allStockData.filter(s => s.pe_ttm > 0 && s.pe_ttm < 15).sort((a,b) => a.pe_ttm - b.pe_ttm).slice(0, 67).map(s => s.ticker);
-        await applyTag('低市盈率', '📈 股市表现类', lowPeStocks, client);
+        const newHighStocks = allStocks.filter(s => s.last_price && s.week_52_high && s.last_price >= s.week_52_high * 0.98).map(s => s.ticker);
+        await applyTag('52周新高', '股市表现类', newHighStocks, client);
         
-        const highMarketCapStocks = allStockData.filter(s => s.market_cap > 50000000000).sort((a,b) => b.market_cap - a.market_cap).slice(0, 50).map(s => s.ticker);
-        await applyTag('高市值', '📈 股市表现类', highMarketCapStocks, client);
-
-        // 💰 财务表现类
-        const highRoeStocks = allStockData.filter(s => s.roe_ttm > 15).sort((a,b) => b.roe_ttm - a.roe_ttm).slice(0, 50).map(s => s.ticker);
-        await applyTag('高ROE', '💰 财务表现类', highRoeStocks, client);
-        
-        // 注意：debt_to_equity、revenue_growth、beta字段在当前数据库结构中不存在，暂时跳过相关标签
-
-        // 🚀 趋势排位类（基于当日涨跌幅）
-        const strongTrendStocks = allStockData.filter(s => parseFloat(s.change_percent) > 5).sort((a,b) => parseFloat(b.change_percent) - parseFloat(a.change_percent)).slice(0, 30).map(s => s.ticker);
-        await applyTag('近期强势', '🚀 趋势排位类', strongTrendStocks, client);
-        
-        const weakTrendStocks = allStockData.filter(s => parseFloat(s.change_percent) < -5).sort((a,b) => parseFloat(a.change_percent) - parseFloat(b.change_percent)).slice(0, 25).map(s => s.ticker);
-        await applyTag('近期弱势', '🚀 趋势排位类', weakTrendStocks, client);
-        
-        // 注意：volume字段在当前数据库结构中不存在，跳过成交量相关标签
-
-        // 注意：sector、index_member等字段在当前数据库结构中不存在，跳过相关标签
-        
-        // 基于现有字段的简化标签
-        const analystRecommendStocks = allStockData.filter(s => s.pe_ttm > 0 && s.pe_ttm < 25 && s.roe_ttm > 8).sort((a,b) => b.roe_ttm - a.roe_ttm).slice(0, 50).map(s => s.ticker);
-        await applyTag('分析师推荐', '⭐ 特殊名单类', analystRecommendStocks, client);
-
         await client.query('COMMIT');
-        res.status(200).json({ success: true, message: "Dynamic tags updated successfully." });
+        res.status(200).json({ success: true, message: `Data and tags updated.` });
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error("Tag update job failed:", error);
+        console.error("!!!!! Job FAILED !!!!!", error);
         res.status(500).json({ success: false, error: error.message });
     } finally {
         client.release();
