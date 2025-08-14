@@ -1,0 +1,17 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
+  "functions": {
+    "pages/api/**/*.js": {
+      "runtime": "nodejs18.x"
+    }
+  },
+  "env": {
+    "NEON_DATABASE_URL": "@neon_database_url",
+    "POLYGON_API_KEY": "@polygon_api_key",
+    "FINNHUB_API_KEY": "@finnhub_api_key",
+    "CRON_SECRET": "@cron_secret"
+  }
+}
