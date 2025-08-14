@@ -1,10 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
-  
-  // 禁用静态导出，因为我们需要API路由
-  output: 'standalone',
   
   // 环境变量配置
   env: {
