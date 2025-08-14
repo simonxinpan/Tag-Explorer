@@ -4,7 +4,7 @@
   "private": true,
   "description": "A smart tagging system for discovering stock clusters.",
   "scripts": {
-    "dev": "vercel dev",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
