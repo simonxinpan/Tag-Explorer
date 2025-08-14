@@ -1,7 +1,7 @@
 # 文件路径: .github/workflows/scheduled_update.yml
 
 # 工作流的名称，会显示在 GitHub Actions 页面
-name: Update Stock Data & Dynamic Tags
+name: Update All Stock Data & Tags Daily
 
 # 定义触发条件
 on:
@@ -15,17 +15,18 @@ on:
 
 # 定义要执行的任务
 jobs:
-  update-data-job:
+  update-all-data-job:
     runs-on: ubuntu-latest
     steps:
-      - name: Call Vercel API to trigger data update
+      - name: Call Vercel API to trigger unified data update
         # 使用 GitHub Secrets 来安全地存储敏感信息
         env:
           DEPLOYMENT_URL: ${{ secrets.VERCEL_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        # 运行 curl 命令，调用我们后端的“数据工人” API
+        # 运行 curl 命令，调用统一的数据更新 API
         # --fail 参数确保在 API 返回错误时，Action 也会失败
+        # --max-time 300 设置5分钟超时，为耗时的数据注入任务提供充足时间
         run: |
-          curl --fail -X GET \
+          curl --fail --max-time 300 -X GET \
             -H "Authorization: Bearer $CRON_SECRET" \
-            "$DEPLOYMENT_URL/api/update-data"
+            "$DEPLOYMENT_URL/api/update-all-data"
