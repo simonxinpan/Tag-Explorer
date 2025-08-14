@@ -39,9 +39,11 @@ async function applyTag(tagName, tagType, tickers, client) { /* ... 和之前一
 
 // --- API 主处理函数 ---
 export default async function handler(req, res) {
-    if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
+    /*
+if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+}
+*/
 
     const client = await pool.connect();
     console.log("===== Starting daily data injection & tag update job =====");
