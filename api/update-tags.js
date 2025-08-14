@@ -1,169 +1,200 @@
-// /api/update-tags.js
+// /api/update-tags.js - 专门处理标签更新的API
 import { Pool } from 'pg';
-const pool = new Pool({ connectionString: process.env.NEON_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
-// 辅助函数：从 Finnhub 获取最新指标和报价
-async function getFinnhubData(symbol, type, apiKey) {
-    let url = '';
-    if (type === 'metrics') url = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${apiKey}`;
-    if (type === 'quote') url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`;
-    if (!url) return null;
-    try {
-        const res = await fetch(url);
-        return res.ok ? res.json() : null;
-    } catch { return null; }
-}
+const pool = new Pool({
+    connectionString: process.env.NEON_DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+});
 
-// 辅助函数：将标签应用到一组股票
-async function applyTag(tagName, tagType, tickers, client) {
-    if (!tickers || tickers.length === 0) return;
-    const { rows: [tag] } = await client.query(
-        `INSERT INTO tags (name, type) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET type = $2 RETURNING id;`,
-        [tagName, tagType]
-    );
-    for (const ticker of tickers) {
-        await client.query(
-            `INSERT INTO stock_tags (stock_ticker, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;`,
-            [ticker, tag.id]
-        );
+// 计算动态标签
+async function calculateDynamicTags(client, ticker, stockData) {
+    const tags = [];
+    
+    // 基于市值的标签
+    if (stockData.market_cap) {
+        if (stockData.market_cap > 200000000000) tags.push('超大盘股');
+        else if (stockData.market_cap > 50000000000) tags.push('大盘股');
+        else if (stockData.market_cap > 10000000000) tags.push('中盘股');
+        else if (stockData.market_cap > 2000000000) tags.push('小盘股');
+        else tags.push('微盘股');
     }
-    console.log(`Tagged ${tickers.length} stocks with '${tagName}'.`);
+    
+    // 基于涨跌幅的标签
+    if (stockData.change_percent !== null && stockData.change_percent !== undefined) {
+        if (stockData.change_percent > 10) tags.push('涨停板');
+        else if (stockData.change_percent > 5) tags.push('强势上涨');
+        else if (stockData.change_percent > 2) tags.push('温和上涨');
+        else if (stockData.change_percent > 0) tags.push('微涨');
+        else if (stockData.change_percent < -10) tags.push('跌停板');
+        else if (stockData.change_percent < -5) tags.push('大幅下跌');
+        else if (stockData.change_percent < -2) tags.push('温和下跌');
+        else if (stockData.change_percent < 0) tags.push('微跌');
+        else tags.push('平盘');
+    }
+    
+    // 基于价格的标签
+    if (stockData.last_price) {
+        if (stockData.last_price > 1000) tags.push('高价股');
+        else if (stockData.last_price > 100) tags.push('中价股');
+        else if (stockData.last_price > 10) tags.push('低价股');
+        else tags.push('超低价股');
+    }
+    
+    // 基于成交量的标签（如果有的话）
+    if (stockData.volume) {
+        if (stockData.volume > 100000000) tags.push('超高成交量');
+        else if (stockData.volume > 50000000) tags.push('高成交量');
+        else if (stockData.volume > 10000000) tags.push('中等成交量');
+        else if (stockData.volume < 1000000) tags.push('低成交量');
+    }
+    
+    // 基于行业的特殊标签
+    if (stockData.sector_zh) {
+        const sector = stockData.sector_zh;
+        if (sector.includes('科技') || sector.includes('信息技术')) {
+            tags.push('科技股');
+        }
+        if (sector.includes('医疗') || sector.includes('生物')) {
+            tags.push('医药股');
+        }
+        if (sector.includes('金融') || sector.includes('银行')) {
+            tags.push('金融股');
+        }
+        if (sector.includes('能源') || sector.includes('石油')) {
+            tags.push('能源股');
+        }
+        if (sector.includes('消费') || sector.includes('零售')) {
+            tags.push('消费股');
+        }
+    }
+    
+    return tags;
 }
 
-// --- 主函数 ---
+// 应用标签到数据库
+async function applyTagsToStock(client, ticker, tags) {
+    let appliedCount = 0;
+    
+    for (const tagName of tags) {
+        try {
+            // 确保标签存在
+            await client.query(
+                `INSERT INTO tags (name, type) VALUES ($1, 'dynamic') ON CONFLICT (name) DO NOTHING`,
+                [tagName]
+            );
+            
+            // 关联股票和标签
+            const result = await client.query(
+                `INSERT INTO stock_tags (stock_ticker, tag_id) 
+                 SELECT $1, id FROM tags WHERE name = $2 
+                 ON CONFLICT (stock_ticker, tag_id) DO NOTHING
+                 RETURNING *`,
+                [ticker, tagName]
+            );
+            
+            if (result.rowCount > 0) {
+                appliedCount++;
+            }
+        } catch (error) {
+            console.warn(`Failed to apply tag ${tagName} to ${ticker}:`, error.message);
+        }
+    }
+    
+    return appliedCount;
+}
+
+// 清理旧的动态标签
+async function cleanupOldDynamicTags(client, ticker) {
+    try {
+        const result = await client.query(
+            `DELETE FROM stock_tags 
+             WHERE stock_ticker = $1 
+             AND tag_id IN (SELECT id FROM tags WHERE type = 'dynamic')`,
+            [ticker]
+        );
+        return result.rowCount;
+    } catch (error) {
+        console.warn(`Failed to cleanup old tags for ${ticker}:`, error.message);
+        return 0;
+    }
+}
+
 export default async function handler(req, res) {
+    // 验证授权
     if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
     const client = await pool.connect();
+    console.log("===== Starting dynamic tags update job =====");
+    
     try {
-        console.log("Starting daily dynamic tag update job...");
         await client.query('BEGIN');
-         
-        // 1. 清理所有旧的"动态"标签关联
-        await client.query(`DELETE FROM stock_tags WHERE tag_id IN (SELECT id FROM tags WHERE type != '行业分类' AND type != '特殊名单类');`);
-        console.log("Cleared old dynamic tags.");
-
-        // 2. 获取所有股票的最新数据
-        const { rows: companies } = await client.query('SELECT ticker FROM stocks');
-        const allStockData = [];
-        for (const company of companies) {
-            const metrics = await getFinnhubData(company.ticker, 'metrics', process.env.FINNHUB_API_KEY);
-            const quote = await getFinnhubData(company.ticker, 'quote', process.env.FINNHUB_API_KEY);
-            if (metrics && quote) {
-                allStockData.push({ 
-                    ticker: company.ticker, 
-                    roe: metrics.metric?.roeTTM,
-                    pe: metrics.metric?.peTTM,
-                    high52: metrics.metric?.['52WeekHigh'],
-                    low52: metrics.metric?.['52WeekLow'],
-                    price: quote.c,
-                    changePercent: quote.dp,
-                    dividendYield: metrics.metric?.dividendYieldAnnual,
-                    marketCap: metrics.metric?.marketCapitalization,
-                    debtToEquity: metrics.metric?.totalDebt2TotalEquityAnnual,
-                    revenueGrowth: metrics.metric?.revenueGrowthTTM,
-                    beta: metrics.metric?.beta,
-                    volatility: metrics.metric?.volatility1Y,
-                    volumeRatio: quote.v / (metrics.metric?.avgVol10Day || 1),
-                    supportLevel: metrics.metric?.['52WeekLow'] * 1.1, // 简化支撑位计算
-                });
+        
+        // 获取所有有数据的股票
+        const { rows: stocks } = await client.query(
+            `SELECT ticker, name_zh, sector_zh, market_cap, last_price, 
+                    change_amount, change_percent, volume, last_updated
+             FROM stocks 
+             WHERE last_price IS NOT NULL 
+             ORDER BY market_cap DESC NULLS LAST
+             LIMIT 200`
+        );
+        
+        console.log(`Found ${stocks.length} stocks with data to process`);
+        
+        let processedCount = 0;
+        let totalTagsApplied = 0;
+        let totalTagsRemoved = 0;
+        
+        for (const stock of stocks) {
+            try {
+                // 清理旧的动态标签
+                const removedTags = await cleanupOldDynamicTags(client, stock.ticker);
+                totalTagsRemoved += removedTags;
+                
+                // 计算新的动态标签
+                const newTags = await calculateDynamicTags(client, stock.ticker, stock);
+                
+                // 应用新标签
+                const appliedTags = await applyTagsToStock(client, stock.ticker, newTags);
+                totalTagsApplied += appliedTags;
+                
+                if (newTags.length > 0) {
+                    console.log(`${stock.ticker} (${stock.name_zh}): Applied ${appliedTags} tags - ${newTags.join(', ')}`);
+                }
+                
+                processedCount++;
+                
+                // 每处理10只股票暂停一下
+                if (processedCount % 10 === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+                
+            } catch (error) {
+                console.warn(`Failed to process tags for ${stock.ticker}:`, error.message);
             }
         }
-        console.log(`Fetched latest data for ${allStockData.length} stocks.`);
-
-        // 3. 重新计算并应用动态标签
         
-        // 📈 股市表现类
-        const newHighStocks = allStockData.filter(s => s.price && s.high52 && s.price >= s.high52 * 0.98).map(s => s.ticker);
-        await applyTag('52周最高', '📈 股市表现类', newHighStocks, client);
-        
-        const newLowStocks = allStockData.filter(s => s.price && s.low52 && s.price <= s.low52 * 1.02).map(s => s.ticker);
-        await applyTag('52周最低', '📈 股市表现类', newLowStocks, client);
-        
-        const highYieldStocks = allStockData.filter(s => s.dividendYield > 3).sort((a,b) => b.dividendYield - a.dividendYield).slice(0, 45).map(s => s.ticker);
-        await applyTag('高股息率', '📈 股市表现类', highYieldStocks, client);
-        
-        const lowPeStocks = allStockData.filter(s => s.pe > 0 && s.pe < 15).sort((a,b) => a.pe - b.pe).slice(0, 67).map(s => s.ticker);
-        await applyTag('低市盈率', '📈 股市表现类', lowPeStocks, client);
-        
-        const highMarketCapStocks = allStockData.filter(s => s.marketCap > 50000000000).sort((a,b) => b.marketCap - a.marketCap).slice(0, 50).map(s => s.ticker);
-        await applyTag('高市值', '📈 股市表现类', highMarketCapStocks, client);
-
-        // 💰 财务表现类
-        const highRoeStocks = allStockData.filter(s => s.roe > 15).sort((a,b) => b.roe - a.roe).slice(0, 50).map(s => s.ticker);
-        await applyTag('高ROE', '💰 财务表现类', highRoeStocks, client);
-        
-        const lowDebtStocks = allStockData.filter(s => s.debtToEquity >= 0 && s.debtToEquity < 0.3).sort((a,b) => a.debtToEquity - b.debtToEquity).slice(0, 78).map(s => s.ticker);
-        await applyTag('低负债率', '💰 财务表现类', lowDebtStocks, client);
-        
-        const highGrowthStocks = allStockData.filter(s => s.revenueGrowth > 0.2).sort((a,b) => b.revenueGrowth - a.revenueGrowth).slice(0, 34).map(s => s.ticker);
-        await applyTag('高增长率', '💰 财务表现类', highGrowthStocks, client);
-        
-        const highBetaStocks = allStockData.filter(s => s.beta > 1.5).sort((a,b) => b.beta - a.beta).slice(0, 88).map(s => s.ticker);
-        await applyTag('高贝塔系数', '💰 财务表现类', highBetaStocks, client);
-        
-        // VIX相关股票（高波动性）
-        const vixRelatedStocks = allStockData.filter(s => s.beta > 2 || (s.volatility && s.volatility > 0.4)).slice(0, 5).map(s => s.ticker);
-        await applyTag('VIX恐慌指数相关', '💰 财务表现类', vixRelatedStocks, client);
-
-        // 🚀 趋势排位类
-        const strongTrendStocks = allStockData.filter(s => s.changePercent > 5).sort((a,b) => b.changePercent - a.changePercent).slice(0, 30).map(s => s.ticker);
-        await applyTag('近期强势', '🚀 趋势排位类', strongTrendStocks, client);
-        
-        const weakTrendStocks = allStockData.filter(s => s.changePercent < -5).sort((a,b) => a.changePercent - b.changePercent).slice(0, 25).map(s => s.ticker);
-        await applyTag('近期弱势', '🚀 趋势排位类', weakTrendStocks, client);
-        
-        const highVolumeStocks = allStockData.filter(s => s.volumeRatio > 2).sort((a,b) => b.volumeRatio - a.volumeRatio).slice(0, 18).map(s => s.ticker);
-        await applyTag('成交量放大', '🚀 趋势排位类', highVolumeStocks, client);
-        
-        const breakoutStocks = allStockData.filter(s => s.price && s.high52 && s.price >= s.high52).slice(0, 23).map(s => s.ticker);
-        await applyTag('突破新高', '🚀 趋势排位类', breakoutStocks, client);
-        
-        const breakdownStocks = allStockData.filter(s => s.price && s.supportLevel && s.price <= s.supportLevel * 0.95).slice(0, 15).map(s => s.ticker);
-        await applyTag('跌破支撑', '🚀 趋势排位类', breakdownStocks, client);
-
-        // 🏭 行业分类 (基于已有数据库sector字段)
-        const { rows: sectorData } = await client.query(`
-            SELECT sector, array_agg(ticker) as tickers, count(*) as count 
-            FROM stocks WHERE sector IS NOT NULL 
-            GROUP BY sector HAVING count(*) >= 10
-        `);
-        
-        for (const sector of sectorData) {
-            let sectorName = sector.sector;
-            if (sectorName.includes('Technology')) sectorName = '科技股';
-            else if (sectorName.includes('Financial')) sectorName = '金融股';
-            else if (sectorName.includes('Healthcare')) sectorName = '医疗保健';
-            else if (sectorName.includes('Energy')) sectorName = '能源股';
-            else if (sectorName.includes('Consumer')) sectorName = '消费品';
-            
-            await applyTag(sectorName, '🏭 行业分类', sector.tickers, client);
-        }
-
-        // ⭐ 特殊名单类 (基于已有数据库index_member字段)
-        const { rows: sp500 } = await client.query(`SELECT ticker FROM stocks WHERE index_member LIKE '%SP500%'`);
-        await applyTag('标普500', '⭐ 特殊名单类', sp500.map(s => s.ticker), client);
-        
-        const { rows: nasdaq100 } = await client.query(`SELECT ticker FROM stocks WHERE index_member LIKE '%NASDAQ100%'`);
-        await applyTag('纳斯达克100', '⭐ 特殊名单类', nasdaq100.map(s => s.ticker), client);
-        
-        const { rows: dow30 } = await client.query(`SELECT ticker FROM stocks WHERE index_member LIKE '%DOW30%'`);
-        await applyTag('道琼斯', '⭐ 特殊名单类', dow30.map(s => s.ticker), client);
-        
-        // ESG评级高和分析师推荐 (基于财务指标)
-        const esgStocks = allStockData.filter(s => s.roe > 10 && s.debtToEquity < 0.5 && s.dividendYield > 1).sort((a,b) => b.roe - a.roe).slice(0, 89).map(s => s.ticker);
-        await applyTag('ESG评级高', '⭐ 特殊名单类', esgStocks, client);
-        
-        const analystRecommendStocks = allStockData.filter(s => s.pe > 0 && s.pe < 25 && s.roe > 8).sort((a,b) => b.roe - a.roe).slice(0, 120).map(s => s.ticker);
-        await applyTag('分析师推荐', '⭐ 特殊名单类', analystRecommendStocks, client);
-
         await client.query('COMMIT');
-        res.status(200).json({ success: true, message: "Dynamic tags updated successfully." });
+        
+        const message = `Tags update completed. Processed ${processedCount} stocks, removed ${totalTagsRemoved} old tags, applied ${totalTagsApplied} new tags.`;
+        console.log(message);
+        
+        res.status(200).json({
+            success: true,
+            message,
+            stats: {
+                processedStocks: processedCount,
+                totalStocks: stocks.length,
+                tagsRemoved: totalTagsRemoved,
+                tagsApplied: totalTagsApplied
+            }
+        });
+        
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error("Tag update job failed:", error);
+        console.error("!!!!! Tags update job FAILED !!!!!", error);
         res.status(500).json({ success: false, error: error.message });
     } finally {
         client.release();

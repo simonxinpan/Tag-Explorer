@@ -1,0 +1,30 @@
+name: Update Dynamic Tags Daily
+
+on:
+  schedule:
+    # 每天 UTC 时间 02:00 (北京时间 10:00) 运行
+    - cron: '0 2 * * *'
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Data Update API
+        run: |
+          curl --fail -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.VERCEL_DOMAIN }}/api/update-data"
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_DOMAIN: ${{ secrets.VERCEL_DOMAIN }}
+
+      - name: Wait and Trigger Tag Update
+        run: |
+          sleep 30
+          curl --fail -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.VERCEL_DOMAIN }}/api/update-tags"
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_DOMAIN: ${{ secrets.VERCEL_DOMAIN }}
