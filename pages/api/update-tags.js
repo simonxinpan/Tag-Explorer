@@ -1,10 +1,4 @@
 // /api/update-tags.js - 专门处理标签更新的API
-import { Pool } from 'pg';
-
-const pool = new Pool({
-    connectionString: process.env.NEON_DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-});
 
 // 计算动态标签
 async function calculateDynamicTags(client, ticker, stockData) {
@@ -125,6 +119,13 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    // 创建数据库连接池
+    const { Pool } = await import('pg');
+    const pool = new Pool({
+        connectionString: process.env.NEON_DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+    });
+    
     const client = await pool.connect();
     console.log("===== Starting dynamic tags update job =====");
     

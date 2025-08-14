@@ -1,11 +1,4 @@
 // /api/update-data.js (最终完整修复版)
-import { Pool } from 'pg';
-
-// 创建数据库连接池
-const pool = new Pool({
-    connectionString: process.env.NEON_DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-});
 
 // 从 Polygon 获取全市场快照
 async function getPolygonSnapshot(apiKey) {
@@ -117,6 +110,13 @@ export default async function handler(req, res) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    // 创建数据库连接池
+    const { Pool } = await import('pg');
+    const pool = new Pool({
+        connectionString: process.env.NEON_DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+    });
+    
     const client = await pool.connect();
     console.log("===== Starting daily data injection & tag update job =====");
     

@@ -1,11 +1,4 @@
 // /api/tags.js
-import { Pool } from 'pg';
-
-const pool = new Pool({
-    connectionString: process.env.NEON_DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-});
-
 export default async function handler(req, res) {
     const { symbol, tag_name } = req.query;
     
@@ -14,6 +7,13 @@ export default async function handler(req, res) {
         // 返回模拟数据用于演示
         return handleMockData(req, res, { symbol, tag_name });
     }
+    
+    // 只在需要时导入数据库模块
+    const { Pool } = await import('pg');
+    const pool = new Pool({
+        connectionString: process.env.NEON_DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+    });
     
     const client = await pool.connect();
      
